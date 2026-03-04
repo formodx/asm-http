@@ -1,0 +1,9 @@
+*((uint64_t *) 0x12345678) = 2147483647;
+mov     eax, 305419896
+mov     QWORD PTR [rax], 2147483647
+
+
+*((uint64_t *) 0x12345678) = 2147483648;
+mov     eax, 305419896
+mov     edx, 2147483648
+mov     QWORD PTR [rax], rdx

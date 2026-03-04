@@ -1,5 +1,5 @@
-%include "externs.asm"
-%include "constants.asm"
+%include "constants.inc"
+%include "externs.inc"
 %define BUFFER_SIZE 8192
 %define RESPONSE_BODY_SIZE 32768
 
@@ -8,7 +8,7 @@
     %strlen length %1
 
     %assign i 0
-    %assign x (length+7) / 8 + 1
+    %assign x (length+7)/8 + 1
     %rep x
         mov qword [string + i], 0
         %assign i i + 8
@@ -20,8 +20,26 @@
         %assign j i - 1
         %substr _string %1 i, 4
         mov dword [string + j], _string
-        %assign i i+4
+        %assign i i + 4
     %endrep
+%endmacro
+
+
+%macro check 1
+    lea rdi, [string]
+    push rax
+    push rax
+    call perror
+    pop rax
+    pop rax
+
+    cmp rax, %1
+    jne %%skip
+
+    mov edi, 1
+    call exit
+
+    %%skip:
 %endmacro
 
 
@@ -44,14 +62,14 @@ section .text
 
         cmp edi, 2
         je .skip1
-            mov rdi, STDERR_FILENO
+            mov edi, STDERR_FILENO
             load_string `usage: %s <port>\n`
             lea rsi, [string]
             mov rax, qword [argv]
             mov rdx, qword [rax]
             call dprintf
 
-            mov rdi, 1
+            mov edi, 1
             call exit
         .skip1 equ $
 
@@ -59,49 +77,47 @@ section .text
         mov rsi, PATH_MAX
         call getcwd
 
-        mov rdi, STDOUT_FILENO
+        mov edi, STDOUT_FILENO
         load_string `current working directory: %s\n`
         lea rsi, [string]
         lea rdx, [current_working_directory]
         call dprintf
 
-        mov rax, qword [argv]
-        add rax, 8
-        mov rdi, qword [rax]
+        mov rdi, qword [argv]
+        add rdi, 8
+        mov rdi, qword [rdi]
         mov rsi, NULL
         mov rdx, 10
         call strtol
 
         mov word [server_port], ax
 
-        mov rdi, STDOUT_FILENO
-        load_string `server port: %d\n`
+        mov edi, STDOUT_FILENO
+        load_string `server port: %hu\n`
         lea rsi, [string]
-        movzx rdx, ax
+        movzx edx, ax
         call dprintf
 
-        mov rdi, AF_INET
-        mov rsi, SOCK_STREAM
-        mov rdx, IPPROTO_IP
+        mov edi, AF_INET
+        mov esi, SOCK_STREAM
+        mov edx, IPPROTO_IP
         call socket
         mov dword [server_fd], eax
 
         load_string `server socket`
-        lea rdi, [string]
-        call exit_on_error
+        check -1
 
         mov edi, dword [server_fd]
-        mov rsi, SOL_SOCKET
-        mov rdx, SO_REUSEADDR
+        mov esi, SOL_SOCKET
+        mov edx, SO_REUSEADDR
         lea rcx, [optval]
-        mov r8, 4
+        mov r8d, 4
         call setsockopt
 
         load_string `server setsockopt`
-        lea rdi, [string]
-        call exit_on_error
+        check -1
 
-        movzx rdi, word [server_port]
+        movzx edi, word [server_port]
         call htons
 
         mov word [server_addr], AF_INET
@@ -109,20 +125,18 @@ section .text
 
         mov edi, dword [server_fd]
         lea rsi, [server_addr]
-        mov rdx, 16
+        mov edx, 16
         call bind
 
         load_string `server bind`
-        lea rdi, [string]
-        call exit_on_error
+        check -1
 
         mov edi, dword [server_fd]
-        mov rsi, 5
+        mov esi, 5
         call listen
 
         load_string `server listen`
-        lea rdi, [string]
-        call exit_on_error
+        check -1
 
         .loop:
             mov edi, dword [server_fd]
@@ -132,23 +146,21 @@ section .text
             mov dword [client_fd], eax
 
             load_string `server accept`
-            lea rdi, [string]
-            call exit_on_error
+            check -1
 
             lea rdi, [buffer]
-            mov rsi, 0
-            mov rdx, BUFFER_SIZE
+            mov esi, 0
+            mov edx, BUFFER_SIZE
             call memset
 
             mov edi, dword [client_fd]
             lea rsi, [buffer]
-            mov rdx, BUFFER_SIZE - 1
-            mov rcx, 0
+            mov edx, BUFFER_SIZE - 1
+            mov ecx, 0
             call recv
 
             load_string `client recv`
-            lea rdi, [string]
-            call exit_on_error
+            check -1
 
             call handle_request
 
@@ -156,8 +168,7 @@ section .text
             call close
 
             load_string `client close`
-            lea rdi, [string]
-            call exit_on_error
+            check -1
 
             jmp .loop
 
@@ -165,89 +176,68 @@ section .text
         call close
 
         load_string `server close`
-        lea rdi, [string]
-        call exit_on_error
+        check -1
 
-        mov rax, 0
+        mov eax, 0
         leave
         ret
 
 
-    exit_on_error:
-        push rbp
-        mov rbp, rsp
-
-        call perror
-
-        call __errno_location
-        cmp dword [rax], 0
-        je .skip2
-            mov rdi, 1
-            call exit
-        .skip2 equ $
-
-        pop rbp
-        ret
-
-
-    %define value rbp - 4
     handle_request:
         push rbp
         mov rbp, rsp
-        sub rsp, 16
 
         call parse_request
 
-        leave
-        ret
-
         lea rdi, [absolute_request_path]
         lea rsi, [current_working_directory]
-        mov rdx, PATH_MAX
+        mov edx, PATH_MAX
         call strncpy
 
         lea rdi, [absolute_request_path]
         mov rsi, qword [path]
-        mov rdx, PATH_MAX - 1
+        mov edx, PATH_MAX - 1
         call strncat
 
-        mov rdi, STDOUT_FILENO
+        mov edi, STDERR_FILENO
         load_string `absolute request path: %s\n`
         lea rsi, [string]
         lea rdx, [absolute_request_path]
         call dprintf
 
         lea rdi, [absolute_request_path]
-        mov rsi, F_OK
-        call access
-        mov dword [value], eax
+        lea rsi, [resolved_path]
+        call realpath
 
-        call __errno_location
-        mov dword [rax], 0
+        load_string `realpath`
+        check NULL
 
-        cmp dword [value], 0
-        jne .end
+        mov edi, STDOUT_FILENO
+        load_string `resolved path: %s\n`
+        lea rsi, [string]
+        lea rdx, [resolved_path]
+        call dprintf
 
         lea rdi, [response_body]
-        mov rsi, 0
-        mov rdx, RESPONSE_BODY_SIZE
+        mov esi, 0
+        mov edx, RESPONSE_BODY_SIZE
         call memset
 
-        lea rdi, [absolute_request_path]
+        lea rdi, [resolved_path]
         call is_directory
 
-        cmp rax, 1
-        je .L1
+        cmp eax, 1
+        je .L2
 
         call serve_file
 
-        jmp .L2
-
-        .L1:
-            call serve_directory
+        jmp .L3
 
         .L2:
-            mov rdi, STDOUT_FILENO
+            call serve_directory
+
+        .L3:
+            mov edi, STDOUT_FILENO
             load_string `%s\n`
             lea rsi, [string]
             lea rdx, [response_body]
@@ -259,12 +249,11 @@ section .text
             mov edi, dword [client_fd]
             lea rsi, [response_body]
             mov rdx, rax
-            mov rcx, 0
+            mov ecx, 0
             call send
 
             load_string `client send`
-            lea rdi, [string]
-            call exit_on_error
+            check -1
 
         .end:
             leave
@@ -285,13 +274,13 @@ section .text
 
         mov qword [method], rax
 
-        mov rdi, STDOUT_FILENO
+        mov edi, STDOUT_FILENO
         load_string `method: %s\n`
         lea rsi, [string]
         mov rdx, rax
         call dprintf
 
-        mov rdi, NULL
+        mov edi, NULL
         load_string " "
         lea rsi, [string]
         lea rdx, [saveptr]
@@ -299,7 +288,7 @@ section .text
 
         mov qword [path], rax
 
-        mov rdi, STDOUT_FILENO
+        mov edi, STDOUT_FILENO
         load_string `path: %s\n`
         lea rsi, [string]
         mov rdx, rax
@@ -315,14 +304,13 @@ section .text
         mov rbp, rsp
         sub rsp, 16
 
-        lea rdi, [absolute_request_path]
+        lea rdi, [resolved_path]
         mov rsi, O_RDONLY
         call open
         mov dword [file_fd], eax
 
         load_string `file open`
-        lea rdi, [string]
-        call exit_on_error
+        check -1
 
         mov edi, dword [file_fd]
         lea rsi, [response_body]
@@ -330,15 +318,13 @@ section .text
         call read
 
         load_string `file read`
-        lea rdi, [string]
-        call exit_on_error
+        check -1
 
         mov edi, dword [file_fd]
         call close
 
         load_string `file close`
-        lea rdi, [string]
-        call exit_on_error
+        check -1
 
         leave
         ret
@@ -372,7 +358,7 @@ section .text
         mov rcx, qword [path]
         call sprintf
 
-        lea rdi, [absolute_request_path]
+        lea rdi, [resolved_path]
         call opendir
 
         mov qword [directory], rax
@@ -389,7 +375,7 @@ section .text
             call strncpy
 
             mov rdi, qword [fullname]
-            lea rsi, [absolute_request_path]
+            lea rsi, [resolved_path]
             mov rdx, PATH_MAX
             call strncpy
 
@@ -478,17 +464,16 @@ section .text
         call stat
 
         load_string `stat`
-        lea rdi, [string]
-        call exit_on_error
+        check -1
 
         mov r8d, dword [statbuf + 24]
-        and r8, 0xF000
-        xor r8, 0x4000
-        test r8, r8
+        and r8d, 0xF000
+        xor r8d, 0x4000
+        test r8d, r8d
         setnz al
-        movzx rax, al
-        not rax
-        and rax, 1
+        movzx eax, al
+        not eax
+        and eax, 1
 
         leave
         ret
@@ -497,9 +482,6 @@ section .text
 section .rodata
     html_begin db `<html>\n\t<head>\n\t\t<title>%s</title>\n\t</head>\n\t<body>\n\t\t<ul>\n`, 0
     html_end db `\t\t</ul>\n\t</body>\n</html>`, 0
-
-
-section .data
 
 
 section .bss
@@ -512,6 +494,7 @@ section .bss
 
     method resq 1
     path resq 1
+    resolved_path resb PATH_MAX
 
     server_fd resd 1
     server_addr resb 16

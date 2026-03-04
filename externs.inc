@@ -1,6 +1,4 @@
-extern __errno_location
 extern accept
-extern access
 extern bind
 extern close
 extern closedir
@@ -17,6 +15,7 @@ extern opendir
 extern perror
 extern read
 extern readdir
+extern realpath
 extern recv
 extern send
 extern setsockopt
